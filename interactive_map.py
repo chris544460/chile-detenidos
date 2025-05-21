@@ -3,8 +3,10 @@ import geopandas as gpd
 import plotly.express as px
 import streamlit as st
 from pathlib import Path
+import json
+import re
 
-FILE_DIR = Path("./data")
+FILE_DIR = Path(__file__).resolve().parent / "data"
 FILE_PATHS = {
     2021: FILE_DIR / '2021 Detenidos_Nacional.xlsb',
     2022: FILE_DIR / '2022 Detenidos_Nacional.xlsb',
@@ -49,20 +51,45 @@ def filter_detentions(df: pd.DataFrame, nationality: str) -> pd.DataFrame:
 def aggregate_detentions(df: pd.DataFrame, level: str) -> pd.DataFrame:
     return df.groupby(level)['Total'].sum().reset_index()
 
-def plot_map(level: str, agg: pd.DataFrame):
+def plot_map(level: str, agg: pd.DataFrame, measure: str):
     geojson_path = GEOJSON_PATHS[level]
-    shapes = gpd.read_file(geojson_path)
-    merged = shapes.merge(agg, on=level, how='left').fillna({'Total': 0})
+    if not geojson_path.exists():
+        st.error(f"GeoJSON not found: {geojson_path}")
+        return
+    # Load geojson manually to avoid fiona.path error
+    gj = json.loads(Path(geojson_path).read_text())
+    # Map GADM NAME fields to our level names
+    name_map = {'Región': 'NAME_1', 'Prefectura': 'NAME_2', 'Comuna': 'NAME_3'}
+    gadm_name_field = name_map[level]
+    # Sanitize geojson feature names for consistent matching
+    for feat in gj['features']:
+        feat['properties'][gadm_name_field] = (
+            feat['properties'][gadm_name_field]
+              .upper()
+              .replace(' ', '')
+        )
+    shapes = gpd.GeoDataFrame.from_features(gj["features"])
+    shapes.crs = "EPSG:4326"
+    # Rename & normalize to match agg
+    shapes = shapes.rename(columns={gadm_name_field: level})
+    shapes[level] = shapes[level].str.upper().str.replace(r'\s+', '', regex=True)
+    st.write("Sanitized shapes:", shapes[[level]].head())
+    merged = shapes.merge(agg, left_on=level, right_on=level, how='left').fillna({'Total': 0})
+    st.write("Merged sample:", merged[[level, 'Total']].head())
+    color = 'Total' if measure == 'Detenciones' else 'DPI'
     fig = px.choropleth_mapbox(
         merged,
-        geojson=merged.geometry.__geo_interface__,
-        locations=merged.index,
-        color='Total',
+        geojson=gj,
+        locations=level,
+        featureidkey=f"properties.{gadm_name_field}",
+        color=color,
         hover_name=level,
         center={'lat': -35.7, 'lon': -71},
         mapbox_style='carto-positron',
         zoom=3.5,
         opacity=0.6,
+        color_continuous_scale='Blues',
+        labels={color: measure}
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -72,10 +99,32 @@ def main():
 
     nationality = st.selectbox('Nacionalidad', sorted(df['Nacionalidad'].dropna().unique()))
     level = st.selectbox('Nivel', ['Región', 'Prefectura', 'Comuna'])
+    measure = st.selectbox('Medida', ['Detenciones', 'DPI'])
 
     filtered = filter_detentions(df, nationality)
     agg = aggregate_detentions(filtered, level)
-    plot_map(level, agg)
+    st.write("Aggregate data sample:", agg.head())
+
+    # Normalize region names to match GeoJSON
+    if level == 'Región':
+        agg['Región'] = (
+            agg['Región']
+              .str.replace('REGIÓN DE ', '', case=False)
+              .str.upper()
+              .str.replace(r'\s+', '', regex=True)
+        )
+        st.write("Normalized agg:", agg.head())
+
+    if measure == 'DPI':
+        total = agg['Total'].sum()
+        # share per region
+        agg['DPI'] = agg['Total'] / total
+        # uniform share
+        uniform_share = 1 / len(agg)
+        agg['DPI'] = agg['DPI'] / uniform_share
+        st.write("Computed DPI:", agg.head())
+
+    plot_map(level, agg, measure)
 
 if __name__ == '__main__':
     main()
