@@ -73,9 +73,9 @@ def plot_map(level: str, agg: pd.DataFrame, measure: str):
     # Rename & normalize to match agg
     shapes = shapes.rename(columns={gadm_name_field: level})
     shapes[level] = shapes[level].str.upper().str.replace(r'\s+', '', regex=True)
-    st.write("Sanitized shapes:", shapes[[level]].head())
+    # st.write("Sanitized shapes:", shapes[[level]].head())
     merged = shapes.merge(agg, left_on=level, right_on=level, how='left').fillna({'Total': 0})
-    st.write("Merged sample:", merged[[level, 'Total']].head())
+    # st.write("Merged sample:", merged[[level, 'Total']].head())
     color = 'Total' if measure == 'Detenciones' else 'DPI'
     fig = px.choropleth_mapbox(
         merged,
@@ -103,7 +103,7 @@ def main():
 
     filtered = filter_detentions(df, nationality)
     agg = aggregate_detentions(filtered, level)
-    st.write("Aggregate data sample:", agg.head())
+    # st.write("Aggregate data sample:", agg.head())
 
     # Normalize region names to match GeoJSON
     if level == 'Región':
@@ -113,7 +113,7 @@ def main():
               .str.upper()
               .str.replace(r'\s+', '', regex=True)
         )
-        st.write("Normalized agg:", agg.head())
+        # st.write("Normalized agg:", agg.head())
 
     if measure == 'DPI':
         total = agg['Total'].sum()
@@ -122,7 +122,7 @@ def main():
         # uniform share
         uniform_share = 1 / len(agg)
         agg['DPI'] = agg['DPI'] / uniform_share
-        st.write("Computed DPI:", agg.head())
+        # st.write("Computed DPI:", agg.head())
 
     plot_map(level, agg, measure)
 
