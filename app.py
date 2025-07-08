@@ -1,4 +1,3 @@
-
 from pathlib import Path
 import pandas as pd
 import unicodedata
@@ -28,6 +27,23 @@ COL_MAP = {
     "total":           "n_det",
 }
 
+# Mapping of Spanish month names to numeric values
+MONTH_MAP = {
+    "enero": 1,
+    "febrero": 2,
+    "marzo": 3,
+    "abril": 4,
+    "mayo": 5,
+    "junio": 6,
+    "julio": 7,
+    "agosto": 8,
+    "septiembre": 9,
+    "setiembre": 9,
+    "octubre": 10,
+    "noviembre": 11,
+    "diciembre": 12
+}
+
 
 def unaccent(s: str) -> str:
     """Strip accents from a string, e.g. 'Año' → 'Ano'."""
@@ -47,6 +63,18 @@ def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
         if key in COL_MAP:
             rename[col] = COL_MAP[key]
     return df.rename(columns=rename)
+
+
+def convert_month(series: pd.Series) -> pd.Series:
+    """
+    Convert Spanish month names in a Series to numeric month (1-12). Handles case-insensitive and unaccented values.
+    """
+    def to_num(val):
+        if pd.isna(val):
+            return pd.NA
+        key = unaccent(str(val)).strip().lower()
+        return MONTH_MAP.get(key, pd.NA)
+    return series.map(to_num).astype('Int64')
 
 
 def load_and_clean():
@@ -77,13 +105,16 @@ def load_and_clean():
             df['year'] = pd.to_numeric(df['year'], errors='coerce')
             df = df[df['year'] == year_file]
 
-        # 5) Numeric conversion for detention counts
+        # 5) Convert month names to numeric
+        df['month'] = convert_month(df.get('month'))
+
+        # 6) Numeric conversion for detention counts
         df['n_det'] = pd.to_numeric(df['n_det'], errors='coerce').fillna(0).astype(int)
 
-        # 6) Overwrite/set year from filename
+        # 7) Overwrite/set year from filename
         df['year'] = year_file
 
-        # 7) Keep all relevant columns
+        # 8) Keep all relevant columns
         cols = [
             'year', 'detained', 'region', 'province', 'comuna',
             'zones', 'prefecture', 'detachment', 'month',
@@ -91,7 +122,7 @@ def load_and_clean():
         ]
         frames.append(df[cols])
 
-    # 8) Concatenate and save full dataset
+    # 9) Concatenate and save full dataset
     det = pd.concat(frames, ignore_index=True)
     det.to_csv("detentions_2021_25.csv", index=False)
 
