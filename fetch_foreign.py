@@ -39,10 +39,14 @@ def extract_zip(zip_path: Path, year: int) -> Path:
 
 
 def find_excel(dir_path: Path) -> Path:
-    for ext in ("*.xlsx", "*.xls", "*.xlsb"):  # handle various formats
-        files = list(dir_path.glob(ext))
-        if files:
-            return files[0]
+    matches = []
+    for ext in ("*.xlsx", "*.xls", "*.xlsb", "*.xlsm"):
+        matches.extend(dir_path.rglob(ext))
+    if matches:
+        return matches[0]
+    print(f"[DEBUG] No Excel found under {dir_path}. Contents:")
+    for p in dir_path.rglob("*"):
+        print("   ", p.relative_to(dir_path))
     raise FileNotFoundError(f"No Excel file found in {dir_path}")
 
 
@@ -68,17 +72,33 @@ def parse_foreign(file_path: Path, year: int) -> pd.DataFrame:
     return df
 
 
-def load_foreign_year(year: int) -> pd.DataFrame:
-    zip_path = download_year(year)
-    folder = extract_zip(zip_path, year)
-    excel_path = find_excel(folder)
-    return parse_foreign(excel_path, year)
+def load_foreign_year(year: int) -> pd.DataFrame | None:
+    """
+    Download, extract and parse the foreign‑population spreadsheet for a single year.
+    Returns a DataFrame on success, or None if the file is missing / unparsable.
+    """
+    try:
+        zip_path = download_year(year)
+        folder = extract_zip(zip_path, year)
+        excel_path = find_excel(folder)  # folder already points to …/extranjeros/<year>
+        return parse_foreign(excel_path, year)
+    except FileNotFoundError as e:
+        print(f"Warning: {e}. Skipping year {year}.")
+        return None
+    except Exception as e:
+        print(f"Error processing year {year}: {e}. Skipping year {year}.")
+        return None
 
 
 def main():
-    frames = []
+    frames: list[pd.DataFrame] = []
     for year in range(2018, 2024):
-        frames.append(load_foreign_year(year))
+        df_year = load_foreign_year(year)
+        if df_year is not None:
+            frames.append(df_year)
+    if not frames:
+        print("No data frames collected – nothing to write.")
+        return
     df = pd.concat(frames, ignore_index=True)
     df.to_csv("census_pop_foreign.csv", index=False)
 
