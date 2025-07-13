@@ -21,3 +21,16 @@ Comuna).
 
 The map will display a heatmap of detentions based on the selected filters and
 show counts when hovering over regions.
+
+### Foreign population dataset
+
+To build `census_pop_foreign.csv` with estimated foreign population by comuna
+and year (2018–2023), run:
+
+```bash
+python fetch_foreign.py
+```
+
+The script downloads the official spreadsheets from
+`serviciomigraciones.cl`, unzips them into `data/extranjeros/` and compiles a
+single CSV.
