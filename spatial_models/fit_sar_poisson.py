@@ -1,40 +1,38 @@
-# spatial_models/fit_sar_poisson.py
-
-import numpy as np
-import pandas as pd
-import libpysal
+import numpy as np, pandas as pd
+from libpysal.weights import Queen
+import libpysal, geopandas as gpd
 from spglm.family import Poisson
 from spglm.glm import GLM
 from spreg import GM_Lag
-from pathlib import Path
 
-# 1. Load data
-df = pd.read_csv("../detentions_2021_25.csv")
-pop = df["pop"]  # make sure you merged pop
 
-# 2. Load W
-npz = np.load("spatial_models/outputs/W_comunas.npz")
-W = npz["W"]       # (n_comunas x n_comunas)
-ids = npz["ids"]   # comuna codes
+# 1. geometry & weights  ------------------------------------
+gdf = gpd.read_file("../data/shapes/comunas.geojson", engine="pyogrio")
+gdf["uid"] = gdf["GID_3"]
 
-# 3. Build spatially lagged log(count)
-#    reorder df by comuna to match ids
-df = df.set_index("comuna").loc[ids].reset_index()
-y = df["n_det"].values
-X = np.log(df["pop"].values + 1).reshape(-1,1)  # intercept later
+# This is *already* a libpysal W object
+w = Queen.from_dataframe(gdf, ids=gdf["uid"])      # <-- remove .to_W()
 
-# 4. Fit SAR-Poisson via generalized method of moments
-model = GM_Lag(y=y, x=X, w=W, name_y="n_det", name_x=["log_pop"],
-               name_w="W", spat_diag=True, name_ds="ChileDet")
-rho = model.rho[0]
-beta = model.betas.flatten()
-pvals = model.vm  # variance matrix for std errors
+# 2. align data to the weight-matrix order  ---------------
+agg = pd.read_csv("outputs/agg_for_r.csv").set_index("uid").loc[w.id_order]
 
-# 5. Save results
-out = pd.DataFrame({
-    "parameter": ["rho","beta_log_pop"],
-    "estimate": [rho, beta[1]],       # beta[0] is intercept
-    "std_err": np.sqrt(np.diag(pvals))
-})
-out.to_csv("spatial_models/outputs/sar_results.csv", index=False)
-print("SAR results saved.")
+y = agg["n_det"].values.reshape((-1, 1))   # GM_Lag expects 2-D
+X = agg[["log_pop"]].values                # (n × k)
+
+from spglm.glm import GLM
+model = GLM(y, X, family=Poisson(), w=w, spat_diag=True,
+            name_y="n_det", name_x=["log_pop"])
+
+
+print(model.summary)
+
+# save
+out = pd.DataFrame(
+    {
+        "parameter": ["beta_const", "beta_log_pop", "rho"],
+        "estimate":  [model.betas[0,0], model.betas[1,0], model.rho[0]],
+        "std_err":   np.sqrt(np.diag(model.vm))
+    }
+)
+out.to_csv("outputs/py_spglm_poisson.csv", index=False)
+print("✓ py_spglm_poisson.csv written")
